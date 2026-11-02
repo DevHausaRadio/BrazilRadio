@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#090f1c">
+<title>My Radio</title>
+<style>
+:root{--bg:#090f1c;--panel:#121d2d;--panel2:#1a2940;--text:#f4f7fb;--muted:#91a2b9;--accent:#45c4f3;--line:#26364d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding-bottom:116px}
+header{padding:22px 17px 12px;background:linear-gradient(145deg,#142944,#090f1c)}
+.brand{display:flex;align-items:center;justify-content:space-between}.brand h1{font-size:22px;margin:0;letter-spacing:1px}.brand small{color:var(--muted)}
+.wrap{padding:14px 15px;max-width:850px;margin:auto}
+.search{display:flex;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:15px}
+.search input{background:none;border:0;outline:0;color:var(--text);width:100%;font-size:15px}
+.tabs{display:flex;gap:8px;overflow:auto;padding:13px 0 5px;scrollbar-width:none}.tabs button,.filter button{white-space:nowrap;border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:9px 13px;border-radius:20px}
+.tabs button.active,.filter button.active{background:var(--accent);border-color:var(--accent);color:#07121d;font-weight:700}
+.section-head{display:flex;justify-content:space-between;align-items:center;margin:17px 0 12px}.section-head h2{font-size:17px;margin:0}.section-head span{font-size:12px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.station{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;min-width:0;position:relative}
+.station.playing{border-color:var(--accent);box-shadow:0 0 0 1px #45c4f344}
+.station-top{display:flex;align-items:center;gap:10px}
+.station-logo{width:49px;height:49px;flex-shrink:0;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,#26364d,#172335);border:1px solid #344760;color:#f4f7fb;font-weight:800;font-size:14px;letter-spacing:.5px;overflow:hidden}.station-logo img{width:100%;height:100%;object-fit:contain;background:transparent;padding:4px}.station-logo.player-logo{width:45px;height:45px;border-radius:10px;font-size:12px}
+.station-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.station-cat{font-size:12px;color:var(--muted);margin-top:3px}
+.station-actions{display:flex;justify-content:space-between;align-items:center;margin-top:13px}
+.station-actions button{border:0;background:var(--panel2);color:var(--text);border-radius:11px;padding:8px 11px}
+.station-actions .play{background:var(--accent);color:#07121d;font-weight:800}
+.station-actions .fav{font-size:19px;background:transparent;padding:5px 8px}
+.empty{color:var(--muted);text-align:center;padding:35px 10px;grid-column:1/-1}
+.player{position:fixed;bottom:0;left:0;right:0;background:#111d2c;border-top:1px solid var(--line);padding:11px 15px calc(11px + env(safe-area-inset-bottom));z-index:5}
+.player-inner{max-width:850px;margin:auto;display:flex;align-items:center;gap:11px}
+
+.now{flex:1;min-width:0}.now strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.now small{color:var(--muted)}
+#toggle{background:var(--accent);color:#07121d;border:0;border-radius:50%;width:45px;height:45px;font-size:19px;font-weight:bold}
+#status{font-size:11px;color:var(--muted);margin-top:3px}
+audio{display:none}
+@media(min-width:600px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<header><div class="wrap" style="padding:0">
+ <div class="brand"><div><h1>MY RADIO</h1><small>Brazilian radio stations</small></div><span aria-hidden="true" style="font-size:28px">📻</span></div>
+ <div class="search"><span>⌕</span><input id="search" type="search" placeholder="Search stations..." autocomplete="off"></div>
+</div></header>
+<main class="wrap">
+ <nav class="tabs" id="categories" aria-label="Station categories"></nav>
+ <div class="section-head"><h2 id="heading">All stations</h2><span id="count"></span></div>
+ <section class="grid" id="stations"></section>
+ <div class="section-head"><h2>Recently played</h2><span>On this device</span></div>
+ <section class="grid" id="recent"></section>
+</main>
+<div class="player">
+ <div class="player-inner">
+  <div id="playerIcon" class="station-logo player-logo" aria-label="Station initials">FM</div>
+  <div class="now"><strong id="playerName">Choose a station</strong><small id="playerCategory">Ready to play</small><div id="status">Not playing</div></div>
+  <button id="toggle" aria-label="Play or pause">▶</button>
+ </div>
+</div>
+<audio id="audio" preload="none" playsinline></audio>
+<script>
+/* Set this to your published stations.json URL if it is not beside index.html. */
+const DATA_URL = "./stations.json";
+const FALLBACK_ICON = "";
+const audio = document.getElementById("audio");
+let stations = [], activeCategory = "All", current = null;
+let favourites = new Set(JSON.parse(localStorage.getItem("radio_favourites") || "[]"));
+let recent = JSON.parse(localStorage.getItem("radio_recent") || "[]");
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function initials(name){
+ const clean=String(name||"Radio").replace(/\([^)]*\)/g," ").replace(/\[[^]]*\]/g," ").replace(/[^\p{L}\p{N} ]/gu," ").trim();
+ const words=clean.split(/\s+/).filter(Boolean);
+ if(!words.length)return "FM";
+ const skip=new Set(["radio","rádio","web","online","fm","am","a","o","the","de","da","do"]);
+ const useful=words.filter(w=>!skip.has(w.toLowerCase()));
+ const chosen=(useful.length?useful:words);
+ return chosen.slice(0,2).map(w=>Array.from(w)[0].toUpperCase()).join("") || "FM";
+}
+function logoHTML(s, extra=""){
+ const label=initials(s.name);
+ if(s.icon) return `<div class="station-logo ${extra}"><img src="${esc(s.icon)}" alt="${esc(s.name)} logo" onerror="this.parentElement.textContent='${esc(label)}'"></div>`;
+ return `<div class="station-logo ${extra}" aria-label="${esc(s.name)} initials">${esc(label)}</div>`;
+}
+function setPlayerLogo(s){document.getElementById("playerIcon").outerHTML=logoHTML(s,"player-logo").replace('<div class="station-logo player-logo"','<div id="playerIcon" class="station-logo player-logo"');}
+function save(){localStorage.setItem("radio_favourites",JSON.stringify([...favourites]));localStorage.setItem("radio_recent",JSON.stringify(recent));}
+function categories(){
+ const names=["All",...new Set(stations.map(s=>s.category||"Other")),"Favourites"];
+ document.getElementById("categories").innerHTML=names.map(c=>`<button class="${c===activeCategory?"active":""}" data-cat="${esc(c)}">${esc(c)}</button>`).join("");
+}
+function card(s){
+ const id=esc(s.id), playing=current&&current.id===s.id;
+ return `<article class="station ${playing?"playing":""}">
+  <div class="station-top">${logoHTML(s)}
+   <div style="min-width:0"><div class="station-name">${esc(s.name)}</div><div class="station-cat">${esc(s.category||"Other")}</div></div></div>
+  <div class="station-actions"><button class="play" data-play="${id}">${playing&& !audio.paused?"Ⅱ Pause":"▶ Play"}</button>
+   <button class="fav" data-fav="${id}" aria-label="Favourite">${favourites.has(s.id)?"♥":"♡"}</button></div>
+ </article>`;
+}
+function render(){
+ categories();
+ const q=document.getElementById("search").value.trim().toLowerCase();
+ let list=stations.filter(s=>(activeCategory==="All"|| (activeCategory==="Favourites"?favourites.has(s.id):s.category===activeCategory)) && (!q||(s.name+" "+s.category).toLowerCase().includes(q)));
+ document.getElementById("heading").textContent=activeCategory==="All"?"All stations":activeCategory;
+ document.getElementById("count").textContent=list.length+" stations";
+ document.getElementById("stations").innerHTML=list.length?list.map(card).join(""):'<div class="empty">No stations found.</div>';
+ const recentList=recent.map(id=>stations.find(s=>s.id===id)).filter(Boolean).slice(0,6);
+ document.getElementById("recent").innerHTML=recentList.length?recentList.map(card).join(""):'<div class="empty">Stations you play will appear here.</div>';
+}
+function playStation(s){
+ if(!s||!s.stream)return;
+ if(current&&current.id===s.id&&!audio.paused){audio.pause();return;}
+ current=s;audio.src=s.stream;audio.load();
+ document.getElementById("playerName").textContent=s.name;
+ document.getElementById("playerCategory").textContent=s.category||"Radio";
+ setPlayerLogo(s);
+ recent=[s.id,...recent.filter(id=>id!==s.id)].slice(0,12);save();render();
+ audio.play().then(()=>{document.getElementById("status").textContent="Playing";document.getElementById("toggle").textContent="Ⅱ";}).catch(()=>{document.getElementById("status").textContent="Unable to play — check stream link or connection";document.getElementById("toggle").textContent="▶";});
+ if("mediaSession" in navigator){
+  navigator.mediaSession.metadata=new MediaMetadata({title:s.name,artist:s.category||"Radio",...(s.icon?{artwork:[{src:s.icon,sizes:"512x512",type:"image/png"}]}:{})});
+  navigator.mediaSession.setActionHandler("play",()=>audio.play());
+  navigator.mediaSession.setActionHandler("pause",()=>audio.pause());
+  navigator.mediaSession.setActionHandler("stop",()=>audio.pause());
+ }
+}
+document.addEventListener("click",e=>{
+ const cat=e.target.closest("[data-cat]");if(cat){activeCategory=cat.dataset.cat;render();return;}
+ const play=e.target.closest("[data-play]");if(play){const s=stations.find(x=>x.id===play.dataset.play);if(s)playStation(s);return;}
+ const fav=e.target.closest("[data-fav]");if(fav){const id=fav.dataset.fav;favourites.has(id)?favourites.delete(id):favourites.add(id);save();render();}
+});
+document.getElementById("search").addEventListener("input",render);
+document.getElementById("toggle").addEventListener("click",()=>{if(!current){document.getElementById("status").textContent="Choose a station first";return;}audio.paused?audio.play():audio.pause();});
+audio.addEventListener("play",()=>{document.getElementById("status").textContent="Playing";document.getElementById("toggle").textContent="Ⅱ";render();});
+audio.addEventListener("pause",()=>{document.getElementById("status").textContent="Paused";document.getElementById("toggle").textContent="▶";render();});
+audio.addEventListener("error",()=>{document.getElementById("status").textContent="Stream unavailable or unsupported";});
+async function init(){
+ try{
+  const r=await fetch(DATA_URL,{cache:"no-store"});if(!r.ok)throw Error("Could not load stations.json");
+  const data=await r.json();
+  stations=data.map((s,i)=>({...s,id:String(s.id||i+1)})).filter(s=>s.name&&s.stream);
+  render();
+ }catch(err){document.getElementById("stations").innerHTML='<div class="empty">Could not load station list. Check that stations.json is published beside this page.</div>';document.getElementById("status").textContent=err.message;}
+}
+init();
+</script>
+</body>
+</html>
